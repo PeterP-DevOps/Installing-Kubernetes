@@ -1,0 +1,73 @@
+
+---
+- name: Install Kubernetes components
+  hosts: k8s_cluster
+  become: true
+  gather_facts: true
+
+  vars:
+    kubernetes_package_version: "1.37.2-1.1"
+
+  tasks:
+
+    - name: Install kubeadm, kubelet and kubectl
+      ansible.builtin.apt:
+        name:
+          - "kubeadm={{ kubernetes_package_version }}"
+          - "kubelet={{ kubernetes_package_version }}"
+          - "kubectl={{ kubernetes_package_version }}"
+        state: present
+        update_cache: true
+
+    - name: Hold Kubernetes packages
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubeadm
+        - kubelet
+        - kubectl
+
+    - name: Enable kubelet service
+      ansible.builtin.systemd:
+        name: kubelet
+        enabled: true
+        state: started
+
+    - name: Check kubeadm version
+      ansible.builtin.command:
+        cmd: kubeadm version -o short
+      register: kubeadm_version
+      changed_when: false
+
+    - name: Check kubelet version
+      ansible.builtin.command:
+        cmd: kubelet --version
+      register: kubelet_version
+      changed_when: false
+
+    - name: Check kubectl version
+      ansible.builtin.command:
+        cmd: kubectl version --client
+      register: kubectl_version
+      changed_when: false
+
+    - name: Check held Kubernetes packages
+      ansible.builtin.command:
+        cmd: apt-mark showhold
+      register: held_packages
+      changed_when: false
+      failed_when: >
+        not (
+          ['kubeadm', 'kubelet', 'kubectl']
+          | difference(held_packages.stdout_lines)
+          | length == 0
+        )
+
+    - name: Display Kubernetes component versions
+      ansible.builtin.debug:
+        msg:
+          - "{{ kubeadm_version.stdout }}"
+          - "{{ kubelet_version.stdout }}"
+          - "{{ kubectl_version.stdout }}"
+          - "Held packages: {{ held_packages.stdout_lines }}"

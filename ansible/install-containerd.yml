@@ -1,0 +1,129 @@
+
+---
+- name: Install and configure containerd 2.x
+  hosts: k8s_cluster
+  become: true
+  gather_facts: true
+
+  vars:
+    containerd_version: "2.2.1-0ubuntu1~22.04.2"
+    runc_version: "1.3.4-0ubuntu1~22.04.1"
+    cni_version: "0.9.1+ds1-1ubuntu0.1"
+
+  tasks:
+    - name: Verify Ubuntu 22.04 and amd64 architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+          - ansible_distribution_version is version("22.04", ">=")
+          - ansible_distribution_version is version("23.04", "<")
+          - ansible_architecture == "x86_64"
+        fail_msg: "Expected Ubuntu 22.04 on amd64"
+
+    - name: Install containerd, runc and CNI plugins
+      ansible.builtin.apt:
+        name:
+          - "containerd={{ containerd_version }}"
+          - "runc={{ runc_version }}"
+          - "containernetworking-plugins={{ cni_version }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Ensure containerd configuration directory exists
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Generate default containerd configuration
+      ansible.builtin.command:
+        cmd: containerd config default
+      register: containerd_default_config
+      changed_when: false
+
+    - name: Write containerd configuration
+      ansible.builtin.copy:
+        content: "{{ containerd_default_config.stdout }}\n"
+        dest: /etc/containerd/config.toml
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart containerd
+
+    - name: Configure systemd cgroup driver
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: '^(\s*)SystemdCgroup = false$'
+        replace: '\1SystemdCgroup = true'
+      notify: Restart containerd
+
+    - name: Ensure CRI plugin is not disabled
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*disabled_plugins\s*=\s*\[[^\]]*"cri"[^\]]*\]'
+        replace: 'disabled_plugins = []'
+      notify: Restart containerd
+
+    - name: Enable and start containerd
+      ansible.builtin.systemd:
+        name: containerd
+        enabled: true
+        state: started
+
+    - name: Apply pending containerd restart
+      ansible.builtin.meta: flush_handlers
+
+    - name: Check containerd service
+      ansible.builtin.command:
+        cmd: systemctl is-active containerd
+      register: containerd_service_status
+      changed_when: false
+      failed_when: containerd_service_status.stdout != "active"
+
+    - name: Check containerd version
+      ansible.builtin.command:
+        cmd: containerd --version
+      register: containerd_version_output
+      changed_when: false
+      failed_when: "'2.2.1' not in containerd_version_output.stdout"
+
+    - name: Check runc version
+      ansible.builtin.command:
+        cmd: runc --version
+      register: runc_version_output
+      changed_when: false
+      failed_when: "'1.3.4' not in runc_version_output.stdout"
+
+    - name: Check CRI plugin
+      ansible.builtin.shell:
+        cmd: "ctr plugins ls | grep -i cri"
+      register: containerd_plugins
+      changed_when: false
+      failed_when: >
+        containerd_plugins.rc != 0
+        or 'ok' not in containerd_plugins.stdout
+
+    - name: Check systemd cgroup driver
+      ansible.builtin.command:
+        cmd: containerd config dump
+      register: containerd_config_dump
+      changed_when: false
+      failed_when: "'SystemdCgroup = true' not in containerd_config_dump.stdout"
+
+    - name: Display containerd status
+      ansible.builtin.debug:
+        msg:
+          - "{{ containerd_version_output.stdout }}"
+          - "{{ runc_version_output.stdout_lines[0] }}"
+          - "Service: {{ containerd_service_status.stdout }}"
+          - "CRI plugin verified"
+          - "SystemdCgroup = true"
+
+  handlers:
+    - name: Restart containerd
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted

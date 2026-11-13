@@ -1,0 +1,85 @@
+
+---
+- name: Configure official Kubernetes APT repository
+  hosts: k8s_cluster
+  become: true
+  gather_facts: true
+
+  vars:
+    kubernetes_minor_version: "v1.37"
+
+  tasks:
+
+    - name: Install repository prerequisites
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gpg
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create APT keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download Kubernetes repository signing key
+      ansible.builtin.get_url:
+        url: "https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor_version }}/deb/Release.key"
+        dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Convert Kubernetes signing key to GPG format
+      ansible.builtin.command:
+        cmd: >
+          gpg --dearmor --yes
+          --output /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+          /etc/apt/keyrings/kubernetes-apt-keyring.asc
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Configure Kubernetes APT repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor_version }}/deb/ /
+
+    - name: Update APT package cache
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Check available kubeadm versions
+      ansible.builtin.command:
+        cmd: apt-cache madison kubeadm
+      register: kubeadm_versions
+      changed_when: false
+
+    - name: Check available kubelet versions
+      ansible.builtin.command:
+        cmd: apt-cache madison kubelet
+      register: kubelet_versions
+      changed_when: false
+
+    - name: Check available kubectl versions
+      ansible.builtin.command:
+        cmd: apt-cache madison kubectl
+      register: kubectl_versions
+      changed_when: false
+
+    - name: Display available Kubernetes versions
+      ansible.builtin.debug:
+        msg:
+          - "kubeadm: {{ kubeadm_versions.stdout }}"
+          - "kubelet: {{ kubelet_versions.stdout }}"
+          - "kubectl: {{ kubectl_versions.stdout }}"

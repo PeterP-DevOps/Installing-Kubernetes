@@ -1,0 +1,56 @@
+
+---
+- name: Generate secure join credentials on Control Plane
+  hosts: k8s_master
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create temporary bootstrap token
+      ansible.builtin.command:
+        argv:
+          - kubeadm
+          - token
+          - create
+          - --ttl
+          - 2h
+      register: join_token
+      no_log: true
+      changed_when: true
+
+    - name: Calculate CA certificate hash
+      ansible.builtin.shell: |
+        set -o pipefail
+        openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt \
+          | openssl pkey -pubin -outform DER 2>/dev/null \
+          | openssl dgst -sha256 -hex \
+          | awk '{print $2}'
+      args:
+        executable: /bin/bash
+      register: ca_hash
+      changed_when: false
+
+    - name: Save CA hash for worker hosts
+      ansible.builtin.set_fact:
+        kubeadm_ca_hash: "{{ ca_hash.stdout }}"
+
+- name: Join Worker nodes to Kubernetes cluster
+  hosts: k8s_workers
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Join cluster using kubeadm
+      ansible.builtin.command:
+        argv:
+          - kubeadm
+          - join
+          - "10.10.0.26:6443"
+          - --token
+          - "{{ hostvars['k8s-master'].join_token.stdout }}"
+          - --discovery-token-ca-cert-hash
+          - "sha256:{{ hostvars['k8s-master'].kubeadm_ca_hash }}"
+          - --cri-socket
+          - unix:///run/containerd/containerd.sock
+        creates: /etc/kubernetes/kubelet.conf
+      no_log: true
