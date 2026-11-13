@@ -65,7 +65,7 @@ Terraform сформировал план создания 8 ресурсов:
 
 ![8](screenshots/8.png)
 
-Проверка сетевой инфраструктуры Flannel на Control Plane. Подтверждено наличие CNI-конфигурации и созданного VXLAN-интерфейса flannel.1.Проверка сетевой инфраструктуры Flannel на Control Plane. Подтверждено наличие CNI-конфигурации и созданного VXLAN-интерфейса flannel.1.
+Проверка сетевой инфраструктуры Flannel на Control Plane. Подтверждено наличие CNI-конфигурации и созданного VXLAN-интерфейса flannel
 
 
 Автоматизированное подключение четырёх Worker-узлов к Kubernetes-кластеру с использованием Ansible и kubeadm join. Bootstrap-токен генерируется автоматически на Control Plane и не выводится в журнал выполнения.
@@ -83,3 +83,8 @@ Terraform сформировал план создания 8 ресурсов:
 Проверка системных компонентов Kubernetes. Подтверждена работоспособность API Server, Scheduler, Controller Manager, etcd, CoreDNS, kube-proxy и сетевого плагина Flannel.
 
 ![12](screenshots/12.png)
+
+Проверка DaemonSet Flannel. Все пять экземпляров сетевого плагина находятся в состоянии Running. На каждом узле кластера запущен собственный Flannel Pod.
+
+![13](screenshots/13.png)
+
